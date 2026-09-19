@@ -1,0 +1,64 @@
+rules_version = '2';
+service cloud.firestore {
+ match /databases/{database}/documents {
+  function signed(){return request.auth != null;}
+  function profile(){return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;}
+  function approved(){return signed() && profile().role in ['teacher','student'];}
+  function teacher(){return approved() && profile().role == 'teacher';}
+  function owner(c){return teacher() && get(/databases/$(database)/documents/classes/$(c)).data.owner == request.auth.uid;}
+  function member(c){return approved() && request.auth.uid in get(/databases/$(database)/documents/classes/$(c)).data.memberIds;}
+  function text(v,n){return v is string && v.size()>0 && v.size()<=n;}
+  match /users/{uid} {
+   allow read: if signed() && request.auth.uid == uid;
+   // Account profiles and roles are provisioned by an administrator in the Console.
+   allow write: if false;
+  }
+  match /classes/{c} {
+   // An approved account can look up a shared, unguessable class code.
+   // This document contains metadata and member UIDs, never names or submissions.
+   allow get: if approved();
+   allow list: if approved() && (resource.data.owner == request.auth.uid || request.auth.uid in resource.data.memberIds);
+   allow create: if teacher() && request.resource.data.keys().hasOnly(['owner','name','section','memberIds'])
+    && request.resource.data.owner == request.auth.uid && request.resource.data.memberIds == []
+    && text(request.resource.data.name,200) && text(request.resource.data.section,200);
+   allow update: if approved() && profile().role == 'student'
+    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds'])
+    && !(request.auth.uid in resource.data.memberIds)
+    && request.resource.data.memberIds == resource.data.memberIds.concat([request.auth.uid]);
+   match /members/{uid} {
+    allow read: if owner(c) || (approved() && resource.data.student == request.auth.uid);
+    allow create, update: if approved() && uid == request.auth.uid
+     && request.resource.data.keys().hasOnly(['student','name'])
+     && request.resource.data.student == uid && request.resource.data.name == profile().name
+     && uid in getAfter(/databases/$(database)/documents/classes/$(c)).data.memberIds;
+   }
+   match /assignments/{a} {
+    allow read: if owner(c) || member(c);
+    allow create: if owner(c) && request.resource.data.keys().hasOnly(['title','description','due','max','kind'])
+     && text(request.resource.data.title,200) && text(request.resource.data.description,10000)
+     && request.resource.data.due is string && request.resource.data.due.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+     && request.resource.data.max is number && request.resource.data.max>=1 && request.resource.data.max<=1000
+     && request.resource.data.kind == 'ใบงาน';
+   }
+   match /submissions/{s} {
+    function valid(){return request.resource.data.keys().hasOnly(['student','assignment','text','date','score','feedback'])
+     && request.resource.data.student == request.auth.uid
+     && request.resource.data.assignment is string
+     && s == request.resource.data.assignment + '_' + request.auth.uid
+     && exists(/databases/$(database)/documents/classes/$(c)/assignments/$(request.resource.data.assignment))
+     && text(request.resource.data.text,20000) && text(request.resource.data.date,40)
+     && request.resource.data.score == null && request.resource.data.feedback == '';}
+    allow read: if owner(c) || (member(c) && (resource.data.student == request.auth.uid));
+    // Transactions must also be able to read a not-yet-created own submission.
+    allow get: if member(c) && !exists(/databases/$(database)/documents/classes/$(c)/submissions/$(s)) && s.matches('.*_' + request.auth.uid);
+    allow create: if member(c) && valid();
+    allow update: if (member(c) && resource.data.student == request.auth.uid && resource.data.score == null && valid()
+      && request.resource.data.assignment == resource.data.assignment)
+     || (owner(c) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['score','feedback'])
+      && request.resource.data.score is number && request.resource.data.score>=0
+      && request.resource.data.score <= get(/databases/$(database)/documents/classes/$(c)/assignments/$(resource.data.assignment)).data.max
+      && request.resource.data.feedback is string && request.resource.data.feedback.size()<=10000);
+   }
+  }
+ }
+}
