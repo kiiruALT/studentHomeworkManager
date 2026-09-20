@@ -53,7 +53,7 @@ npm ci --prefix functions
 npm install -g firebase-tools
 firebase login
 firebase use studentworkmanager-23a63
-firebase deploy --only firestore:rules,functions,hosting
+firebase deploy --only firestore:rules,hosting
 ```
 
 `.firebaserc` already selects your project and `firebase.json` serves the built SPA with route fallback. The CLI prints your deployed URL. These commands require an account authorized for your Firebase project. No service account key needs to be shared in chat or committed to GitHub.
