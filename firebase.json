@@ -22,6 +22,12 @@
     },
     "ui": {
       "enabled": false
+    },
+    "auth": {
+      "port": 9099
     }
+  },
+  "functions": {
+    "source": "functions"
   }
 }

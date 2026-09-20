@@ -6,30 +6,39 @@ service cloud.firestore {
   function approved(){return signed() && profile().role in ['teacher','student'];}
   function teacher(){return approved() && profile().role == 'teacher';}
   function owner(c){return teacher() && get(/databases/$(database)/documents/classes/$(c)).data.owner == request.auth.uid;}
-  function member(c){return approved() && request.auth.uid in get(/databases/$(database)/documents/classes/$(c)).data.memberIds;}
+  function active(c){return get(/databases/$(database)/documents/classes/$(c)).data.get('deleted',false) == false;}
+  function member(c){return active(c) && approved() && profile().teacherId == get(/databases/$(database)/documents/classes/$(c)).data.owner && request.auth.uid in get(/databases/$(database)/documents/classes/$(c)).data.memberIds;}
   function text(v,n){return v is string && v.size()>0 && v.size()<=n;}
   match /users/{uid} {
-   allow read: if signed() && request.auth.uid == uid;
+   allow read: if signed() && (request.auth.uid == uid || (teacher() && resource.data.teacherId == request.auth.uid));
    // Account profiles and roles are provisioned by an administrator in the Console.
    allow write: if false;
   }
   match /classes/{c} {
    // An approved account can look up a shared, unguessable class code.
    // This document contains metadata and member UIDs, never names or submissions.
-   allow get: if approved();
+   allow get: if approved() && (resource.data.owner == request.auth.uid || profile().teacherId == resource.data.owner);
    allow list: if approved() && (resource.data.owner == request.auth.uid || request.auth.uid in resource.data.memberIds);
    allow create: if teacher() && request.resource.data.keys().hasOnly(['owner','name','section','memberIds'])
     && request.resource.data.owner == request.auth.uid && request.resource.data.memberIds == []
     && text(request.resource.data.name,200) && text(request.resource.data.section,200);
-   allow update: if approved() && profile().role == 'student'
+   allow update: if owner(c) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name','section','deleted','memberIds','blockedIds'])
+    && text(request.resource.data.name,200) && text(request.resource.data.section,200)
+    && request.resource.data.get('deleted',false) is bool
+    && request.resource.data.memberIds is list && request.resource.data.get('blockedIds',[]) is list;
+   allow update: if active(c) && approved() && profile().role == 'student'
+    && !(request.auth.uid in resource.data.get('blockedIds',[]))
+    && profile().teacherId == resource.data.owner
     && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['memberIds'])
     && !(request.auth.uid in resource.data.memberIds)
     && request.resource.data.memberIds == resource.data.memberIds.concat([request.auth.uid]);
    match /members/{uid} {
+    allow delete: if owner(c);
     allow read: if owner(c) || (approved() && resource.data.student == request.auth.uid);
-    allow create, update: if approved() && uid == request.auth.uid
+    allow create, update: if active(c) && approved() && uid == request.auth.uid
      && request.resource.data.keys().hasOnly(['student','name'])
      && request.resource.data.student == uid && request.resource.data.name == profile().name
+     && profile().teacherId == getAfter(/databases/$(database)/documents/classes/$(c)).data.owner
      && uid in getAfter(/databases/$(database)/documents/classes/$(c)).data.memberIds;
    }
    match /assignments/{a} {

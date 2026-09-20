@@ -26,17 +26,13 @@ Accounts are provisioned by the project administrator. There is no public regist
    - `role`: `teacher`
 5. Teacher signs in using that email and password.
 
-### Student username sign-in
+### Student accounts — teacher tab
 
-For a student whose chosen username or student ID is `65001`:
+After deploying the function below, sign in as teacher → **จัดการนักเรียน** → enter **USERNAME** and **PASSWORD**, plus an optional display name → **สร้างบัญชีนักเรียน**. This creates both Firebase Authentication and the Firestore profile automatically without signing the teacher out. Students type only their username and password. Usernames must be unique across the whole project; use 3–40 lowercase English letters/numbers/dots/underscores/hyphens. Passwords are 10–128 characters and must also meet any Firebase password policy you enable.
 
-1. Authentication → Users → Add user.
-2. Email: `65001@studentworkmanager-23a63.students.invalid`.
-3. Choose a separate private password (at least 10 characters recommended), then copy the UID.
-4. Create `users/{UID}` in Firestore with string fields `name` (student's display name) and `role` = `student`.
-5. The student enters **65001** and their password in the app. The app constructs the internal email alias; the student does not need an email inbox.
+Each student profile receives `teacherId` from the authenticated teacher, never from the form. Other teachers cannot read that profile. Students can join only that teacher's subjects. Passwords are sent to Firebase Auth through the server function and are never stored in Firestore, returned by the function, or shown in the roster. Give students their initial credentials privately. Password reset from the teacher tab and bulk import are not yet included.
 
-Usernames use lowercase English letters, numbers, dots, underscores and hyphens. Use unique usernames; use the same spelling in the internal email. The alias domain has no mailbox. Give credentials privately. Student IDs are suitable usernames, but should not be used as passwords because they are often known by others. Users can change their password in the app; a first-login change is not forcibly enforced. If a password is forgotten, the administrator must reset it using Firebase Admin tooling, or delete/recreate the Auth account **with the same UID using Admin tooling** to retain links; do not casually recreate it in the Console with a new UID. Real-email teacher accounts can also use Firebase's Console password-reset email action.
+**Existing manually created students:** add a string `teacherId` containing their teacher's Firebase Auth UID to each `users/{studentUID}` document before deploying these rules. Without it, existing students cannot access subject content. Review any old cross-teacher memberships and remove stale memberships using the Console. Teacher accounts are still provisioned manually by the administrator; students cannot promote themselves.
 
 ## 3. เรียกใช้และเผยแพร่
 
@@ -47,14 +43,17 @@ npm ci
 npm run dev
 ```
 
-Open the local URL shown by Vite. For hosting:
+Open the local URL shown by Vite. **One-time requirement:** deploying Cloud Functions requires the Firebase Blaze pay-as-you-go billing plan. Enable it in Firebase Console before deploying; usage charges can apply. Set budget alerts. This package does not enable billing or deploy anything automatically. See https://firebase.google.com/docs/functions/get-started .
+
+For hosting and the account-creation function:
 
 ```sh
 npm run build
+npm ci --prefix functions
 npm install -g firebase-tools
 firebase login
 firebase use studentworkmanager-23a63
-firebase deploy --only firestore:rules,hosting
+firebase deploy --only firestore:rules,functions,hosting
 ```
 
 `.firebaserc` already selects your project and `firebase.json` serves the built SPA with route fallback. The CLI prints your deployed URL. These commands require an account authorized for your Firebase project. No service account key needs to be shared in chat or committed to GitHub.
@@ -78,8 +77,21 @@ Create an empty repository and upload this folder's source, including `.firebase
 
 - Starts with empty Firebase data. Existing Sites records are not migrated and the old hosted Site is unchanged.
 - Student text answers, document URLs, classes, assignment metadata and scores are stored in Firestore. Uploaded files are not implemented; linked files remain wherever their owners host them. The Storage bucket in the config is not used.
-- Approved users holding a subject's unguessable join code can look up that subject's name, section, owner UID and member UIDs. Student names, submissions and grades are stored separately and access-restricted.
-- Provisioning, roster management, deletion, due-date editing, code rotation, bulk import, and automated backups are not in this first version.
-- Production build and 26 Firestore emulator authorization checks passed during preparation. Run `npm run test:rules` with Java 17 installed to repeat the rules checks against a local demo project. Real-project login, writes and deployment require your Firebase setup; no live student records were created during preparation.
+- The owning teacher and their linked students holding a subject's unguessable join code can look up that subject's name, section, owner UID and member UIDs. Student names, submissions and grades are stored separately and access-restricted.
+- Teacher-created student accounts and a teacher-specific roster are included. Deletion, teacher password reset, due-date editing, code rotation, bulk import, and automated backups are not included.
+- Production build and 31 Firestore emulator authorization checks and account-creation integration checks passed during preparation. Run `npm run test:rules` and `npm run test:accounts` with Java 17 installed to repeat the rules checks against a local demo project. Real-project login, writes and deployment require your Firebase setup; no live student records were created during preparation.
 
 Official references: https://firebase.google.com/docs/web/setup · https://firebase.google.com/docs/auth/web/password-auth · https://firebase.google.com/docs/firestore/security/get-started · https://firebase.google.com/docs/hosting/quickstart
+
+## Classroom management update
+
+Open a class folder → จัดการห้องเรียน. Rename the folder and its subjects, delete an individual subject or the entire folder, or remove a student from every subject in the folder. Only the owning teacher can make these changes. Removal does not delete the Firebase Auth account or historical work; the student is blocked from rejoining those subjects. Deletion is recoverable: subject documents get `deleted: true`; their records remain stored and count toward storage usage. An administrator can restore a subject by setting `deleted` to false in the Console. To allow a removed student to rejoin, remove their UID from the subject's `blockedIds` array.
+
+The watermark reads ห้องเรียนครูจุฑารัตน์. Management controls and the watermark require no Cloud Functions. For manual-account/Spark use, deploy only rules and hosting:
+
+```sh
+npm run build
+firebase deploy --only firestore:rules,hosting
+```
+
+The optional account-creation function from the preceding edition is still included in the source, but is not required for these classroom features. Continue provisioning accounts manually if you are not deploying it.
